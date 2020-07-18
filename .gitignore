@@ -1,0 +1,5 @@
+.cproject
+.project
+STM32F072RBTX_FLASH.ld
+.settings/
+Debug/
