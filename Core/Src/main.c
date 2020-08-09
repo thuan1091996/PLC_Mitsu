@@ -19,6 +19,9 @@
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
+#include "stdio.h"
+#include "stdint.h"
+#include "string.h"
 #include "main.h"
 #include "i2c.h"
 #include "spi.h"
@@ -26,19 +29,45 @@
 #include "usart.h"
 #include "usb.h"
 #include "gpio.h"
-#include "PLC_MITSU.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "PLC_MITSU.h"
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
+/*!
+ * System status
+ */
+typedef enum SystemStatus
+{
+	STATUS_OK = 0,
+	STATUS_ERROR,
+	STATUS_TX_TIMEOUT,
+	STATUS_RX_TIMEOUT
+}SystemStatus;
+SystemStatus Sys_CurState=STATUS_OK;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
+#define USED				1
+#define NOT_USED			0
+#define DEBUG_PROBE			USED
 /* USER CODE BEGIN PD */
+
+/*!
+ * System status message
+ */
+static const char* SystemStatusMessage[] =
+{
+    "OK",
+    "Error",
+    "TX timeout",
+	"RX timeout"
+};
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -55,12 +84,38 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+#if DEBUG_PROBE
 
+#ifdef __GNUC__
+  /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
+     set to 'Yes') calls __io_putchar() */
+  #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#else
+  #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#endif /* __GNUC__ */
+
+/**
+  * @brief  Retargets the C library printf function to the USART.
+  * @param  None
+  * @retval None
+  */
+PUTCHAR_PROTOTYPE
+{
+    /* Place your implementation of fputc here */
+    /* e.g. write a character to the USART */
+    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 100);
+
+
+    return ch;
+}
+
+#endif /*End of DEBUG_PROBE*/
+
+void UpdateStatus(SystemStatus newStatus);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 /* USER CODE END 0 */
 
 /**
@@ -98,19 +153,18 @@ int main(void)
   MX_USB_PCD_Init();
   /* USER CODE BEGIN 2 */
 
-
-
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	uint16_t data_read_d[10]={0};
+//	uint16_t data_read_d[10]={0};
+
   /******************************TEST PLC**************************************/
-  	Write_M(500, M_SET);
-  	Read_D(data_read_d, 0, 1);
+//  	Write_M(500, M_SET);
+//  	Read_D(data_read_d, 0, 1);
+
   /****************************************************************************/
     /* USER CODE END WHILE */
 
@@ -166,6 +220,13 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void UpdateStatus(SystemStatus newStatus)
+{
+	Sys_CurState = newStatus;
+	#if DEBUG_PROBE
+	printf("%s \n",SystemStatusMessage[newStatus]);
+	#endif /*End of DEBUG_PROBE*/
+}
 
 /* USER CODE END 4 */
 
