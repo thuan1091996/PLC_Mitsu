@@ -32,11 +32,23 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "PLC_MITSU.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+
+/*!
+ * System status
+ */
+typedef enum SystemStatus
+{
+	STATUS_OK = 0,
+	STATUS_ERROR,
+	STATUS_BUSY,
+	STATUS_TX_TIMEOUT,
+	STATUS_RX_TIMEOUT
+}SystemStatus;
 
 /* USER CODE END ET */
 
@@ -95,7 +107,10 @@ void Error_Handler(void);
 #define SWCLK_Pin GPIO_PIN_14
 #define SWCLK_GPIO_Port GPIOA
 /* USER CODE BEGIN Private defines */
-
+#define USED				1
+#define NOT_USED			0
+#define DEBUG_PROBE			USED
+#define	STM32_MCU			USED
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

@@ -6,11 +6,26 @@
  *      Author: Itachi
  */
 
+#include "main.h"
 #include "PLC_MITSU.h"
 
-#define UART_TIMEOUT	10
-
+/*--------------------------Global Variables--------------------------*/
+extern SystemStatus Sys_CurState;
 extern UART_HandleTypeDef huart1;
+
+////////////////////////////////////////////////////////////////////////
+static uint8_t     data_send_2plc[15];
+
+////////////////////////////////////////////////////////////////////////
+/*--------------------------------------------------------------------*/
+
+
+/*--------------------------MACRO--------------------------*/
+#if STM32_MCU
+#define UART_TIMEOUT			10
+#define UART_TX_TIMEOUT			500
+#endif
+/*---------------------------------------------------------*/
 
 /* --------------------------Read_D------------------------------
  * Read D memory of PLC FX series
@@ -27,15 +42,14 @@ bool Read_D(uint16_t *ui16DataD_PLC, //TODO
             uint16_t  ui16Length)
 {
 	/*-----Variables for PLC Read------- */
-//    static uint16_t data_d_plc[50]={0}; //TODO - WHY STATIC
-    uint16_t data_d_plc[50]={0};
+	HAL_StatusTypeDef transmit_status=HAL_BUSY;
     uint32_t csum=0;				//Check sum local variable
     uint8_t  csum_low,csum_high;
     uint8_t  type_low,type_high;
     uint8_t  size_low,size_high;	//Size of byte to read
     uint16_t start_addr_temp=0;
     uint8_t  start_addr_b0,start_addr_b1,start_addr_b2;
-    bool retval=0;
+    bool retval=false;
     //Data processing
     //-------------Packet the Type (Read D Memory)----------------------//
     type_low    =   Convert_2Char(D_MEM_READ&0x0F);
@@ -50,7 +64,7 @@ bool Read_D(uint16_t *ui16DataD_PLC, //TODO
     size_high   =   Convert_2Char(( (ui16Length*2) >>4)&0x000F);
     //-------------Check sum----------------------//
     csum = type_high+type_low+start_addr_b2+start_addr_b1+start_addr_b0+size_high+size_low+ETX;
-    csum = csum&0x00FF;                          // Collect 2 last nibbles for sum check
+    csum = csum&0x00FF;                          	 // Collect 2 last nibbles for sum check
     csum_low = Convert_2Char(csum&0x000F);           // Last digit have  4 bits
     csum_high= Convert_2Char((csum>>4)&0x000F);
     //Package the data
@@ -66,13 +80,32 @@ bool Read_D(uint16_t *ui16DataD_PLC, //TODO
     data_send_2plc[9]=csum_high;
     data_send_2plc[10]=csum_low;
     // Send data_send_2plc to UART transmitter and send to PLC
-    HAL_UART_Transmit(&huart1, data_send_2plc, (sizeof(data_send_2plc)/ sizeof(uint8_t)), UART_TIMEOUT);
-    if (ProcessData(data_d_plc, D_MEM_READ,ui16Length)==1) //If true value, then copy value to right place
+    transmit_status = HAL_UART_Transmit(&huart1, data_send_2plc, (sizeof(data_send_2plc)/ sizeof(uint8_t)), UART_TX_TIMEOUT);
+    switch (transmit_status)
     {
-    	memcpy(ui16DataD_PLC,data_d_plc,(sizeof(data_send_2plc)/ sizeof(uint8_t)));
-    	retval=1;
-    }
-    return retval;
+		case HAL_ERROR:
+		Sys_CurState=STATUS_ERROR;
+		break;
+
+		case HAL_BUSY:
+		Sys_CurState=STATUS_BUSY;
+		break;
+
+		case HAL_TIMEOUT:
+		Sys_CurState=STATUS_TX_TIMEOUT;
+		break;
+
+		default:
+		Sys_CurState=STATUS_OK;
+//		if (ProcessData(data_d_plc, D_MEM_READ,ui16Length) == 1) //If true value, then copy value to right place
+//		{
+//			memcpy(ui16DataD_PLC,data_d_plc,(sizeof(data_send_2plc)/ sizeof(uint8_t)));
+//			retval=1;
+//		}
+		break;
+	}
+    ProcessData(ui16DataD_PLC, 1, 1);
+	return retval;
 }
 
 ///* ------------------Read_M(uint16_t ui16Start_Addr)----------------
@@ -282,93 +315,108 @@ void Write_M(uint16_t ui16Start_Addr, uint8_t Type)
 	HAL_Delay(1000);
 }
 
-
-// Consider to use timer to start timeout, stay in this loop is very dangerous
+/*--------------------------Test variables--------------------------*/
+//TODO: CHANGE TO STATIC
+#define DATA_SIZE			20	//TODO: Validate size
+PLC_RecvStatus PLC_curstate = PLCState_Initial;
+char DataRX[DATA_SIZE]={0};
+char DataCheckSum[2]={0};
+uint8_t Data_Recv=0;
+uint8_t count_recvdata=0, RX_DoneFlag=0;
+/*--------------------------------------------------------------------*/
 uint8_t	ProcessData(uint16_t  *Data_PLC,
                     uint8_t    Mem_Type,
                     uint16_t   Size )
 {
-//    unsigned long time_out_max=0;
-    uint16_t data_length;
-    uint8_t recv_temp=0;         //variable to collect data from UART
-    uint8_t start_process=0;     //function running flag
-    uint8_t byte_count=0 ;       //increase after collect 1 byte data
-    uint8_t byte_end=0;          //assign the last value of data frame "ETX"
-    uint8_t csum_count_recv=0;   //increase after collect 1 byte checksum data
-    uint8_t csum_count_cal=0;    //use to calculate check sum
-    unsigned long sum_cal=0;
-    uint8_t sum_low,sum_high;
-    uint8_t data_correct=0;      //data receive flag, detect if data is right or wrong
-    //Stay here as long as there are data in receive FIFO and within timeout
-//    time_out_max=Size*7;
-//    if (Size==50) time_out_max=250; //800us for each word
-//    if (Size==20) time_out_max=20;
-//    if (Size==10) time_out_max=10;
-//    while((!data_correct) && (Timeout(time_out_max, 2)==0))
+	uint8_t recvdata_len=0;
+	uint8_t recvdata_count=0;				//count number of D memory receive from PLC
+	uint8_t recvdata_countbyte=0;
+	uint8_t count_csum=0;
+	uint32_t sum_all=0;
+	char sumdata_cal[2]={0};
+	char sumdata_recv[2]={0};
+while(1)
 {
-//    while(UARTCharsAvail(UART1_BASE))
-    {
-//        recv_temp=UARTCharGet(UART1_BASE);
- //-------------------Detect START signal-------------------------------//
-        if(recv_temp==STX)
-        {
-            byte_count=0;                           //Reset counter
-            start_process=1;                        //Start the processing
-            data_recv[byte_count]=recv_temp;        //Store the STX signal (1st element)
-            byte_count++;                           //Next byte
-//            delay_us(2000);
-        }
+    HAL_UART_Receive(&huart1, &Data_Recv, 1, 50); // Detect new header
+	switch (PLC_curstate)
+	{
+	case PLCState_Initial:
+		if(Data_Recv == STX)
+		{
+			// Clear the buffer before new receive session
+			//TODO: No need since local vars will be all cleared
+			for(int i=0; i< DATA_SIZE; i++)
+			{
+				DataRX[i]= 0;
+				if(i<2) sumdata_recv[i]= 0;
+				sum_all=0;
+				count_csum=0;
+				count_recvdata= 0;
+			}
+			PLC_curstate = PLCState_DetectSTX;
+		}
+		break;
 
-//--------If it is not the start or stop bit but start bit already appear, store data value-----------------//
-        else if( (start_process==1) && (recv_temp!=ETX) )
-        {
-            data_recv[byte_count]=recv_temp;
-            byte_count++;
-//            delay_us(500);
-        }
-//-----------Detect STOP signal, start ending process, check sum and store value---------------------------//
-        else if( (start_process==1) && (recv_temp==ETX))
-        {
-            data_recv[byte_count]=recv_temp;  //Store ETX signal (0x03) in DATA[byte_count]
-            byte_end=byte_count;              //Detect how many bytes received
-            data_length=(byte_end-1)/4;
-            byte_count++;
-//            delay_us(1000);
-            // Collect check sum data from PLC
-            for(csum_count_recv=0;csum_count_recv<2;csum_count_recv++)
-            {
-                //Careful with infinite loop below
-//                while(UARTCharsAvail(UART1_BASE)==0); //If no data stay in loop, do next instruction when have data
-//                data_recv[byte_count]=UARTCharGet(UART1_BASE);
-                byte_count++;
-            }
-            // Calculate sum by receiving data
-            for(csum_count_cal=1;csum_count_cal<=byte_end;csum_count_cal++)  sum_cal+=data_recv[csum_count_cal];   //Sum=data_recv[1->byte_end]
-            sum_low =Convert_2Char(sum_cal&0x0F);             //sum_low (char)
-            sum_high=Convert_2Char((sum_cal>>4)&0x0F);        //sum_high (char)
-            // Compare data from PLC VS receiving data
-//            if( (data_recv[byte_end+1]==sum_high) && (data_recv[byte_end+2]==sum_low))    { data_correct=1; break;}
-//            else                                                                            data_correct=0;
-        }
-    }
+	case PLCState_DetectSTX:
+		if(Data_Recv == ETX)
+		{
+			PLC_curstate = PLCState_DetectETX;
+			recvdata_len=count_recvdata/4;
+		}
+		else
+		{
+			DataRX[count_recvdata++]=Data_Recv;
+		}
+		break;
+
+	case PLCState_DetectETX:
+		// Receive 2 bytes CRC
+		sumdata_recv[count_csum++]=Data_Recv;
+		if(count_csum >= 2)
+		{
+			PLC_curstate = PLCState_CSUM;
+		}
+		break;
+
+	case PLCState_CSUM:
+		// Calculate sum
+		sum_all = ETX;
+		for(int sumloop=0; sumloop<= count_recvdata; sumloop++)
+		{
+			sum_all+=DataRX[sumloop];
+		}
+		sumdata_cal[1]=Convert_2Char(sum_all&0x0F); sumdata_cal[0]=Convert_2Char((sum_all>>4)&0x0F);
+		if (memcmp(sumdata_cal, sumdata_recv, 2) == 0)
+		{
+			PLC_curstate = PLCState_OK;
+		}
+		else
+		{
+			PLC_curstate = PLCState_Error;
+		}
+		break;
+
+	case PLCState_OK:
+		for(recvdata_count=0;recvdata_count<recvdata_len;recvdata_count++)
+		{
+		   Data_PLC[recvdata_count]=Calculate_Data(DataRX[(recvdata_countbyte+1)], DataRX[(recvdata_countbyte)],
+				   	   	   	   	   	   	   	   	   DataRX[(recvdata_countbyte+3)], DataRX[(recvdata_countbyte+2)]);
+		   recvdata_countbyte+=4;
+		}
+		PLC_curstate = PLCState_Finish;
+		break;
+
+	case PLCState_Error:
+		PLC_curstate = PLCState_Initial; //TODO: Handle error case
+		break;
+
+	case PLCState_Finish:
+		return true;
+		break;
+	}
 }
-//    UARTFIFODisable(UART1_BASE);
-//    UARTFIFOEnable(UART1_BASE);
-    if(data_correct==1)
-    {
-        uint8_t temp_data_count=0;
-        uint8_t temp_data_count1=0;
-        for(temp_data_count=0;temp_data_count<data_length;temp_data_count++)
-        {
-           Data_PLC[temp_data_count]=Calculate_Data(data_recv[(temp_data_count1+2)], data_recv[(temp_data_count1+1)], data_recv[(temp_data_count1+4)], data_recv[(temp_data_count1+3)]);
-           temp_data_count1+=4;
-//           Error_PLC=0;
-        }
-        return 1;
-    }
-//    Error_PLC++;
-    return 0;
 }
+
 /* ---------uint16_t Correct_Process(uint16_t Mem_type)-------------
  * Operating: Find the true value of Process function
  * Because Process usually return 0, try (n=200) time if none zero return

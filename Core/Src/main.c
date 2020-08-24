@@ -39,23 +39,10 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
-/*!
- * System status
- */
-typedef enum SystemStatus
-{
-	STATUS_OK = 0,
-	STATUS_ERROR,
-	STATUS_TX_TIMEOUT,
-	STATUS_RX_TIMEOUT
-}SystemStatus;
 SystemStatus Sys_CurState=STATUS_OK;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
-#define USED				1
-#define NOT_USED			0
-#define DEBUG_PROBE			USED
 /* USER CODE BEGIN PD */
 
 /*!
@@ -65,6 +52,7 @@ static const char* SystemStatusMessage[] =
 {
     "OK",
     "Error",
+	"Busy",
     "TX timeout",
 	"RX timeout"
 };
@@ -108,7 +96,6 @@ PUTCHAR_PROTOTYPE
 
     return ch;
 }
-
 #endif /*End of DEBUG_PROBE*/
 
 void UpdateStatus(SystemStatus newStatus);
@@ -159,11 +146,29 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	uint16_t data_read_d[10]={0};
+	uint16_t data_read_d[10]={0};
+	/******************************TEST PLC**************************************/
+//	printf("Tested data input \n");
+	// Input to test: 02 30 31 30 30 30 30 32 03 35 36
+//	ProcessData(&data_read_d, 1, 1);
+//	if( Data_Recv == STX)
+//	{
+//		for(int i=0; i< DATA_SIZE; i++)
+//		{
+//			DataRX[i]= 0;
+//		}
+//		PLC_curstate = PLC_DetectSTX;
+//	}
+//	else if (PLC_curstate == PLC_DetectSTX)
+//	{
+//
+//	}
 
-  /******************************TEST PLC**************************************/
-//  	Write_M(500, M_SET);
-//  	Read_D(data_read_d, 0, 1);
+//	else
+	/******************************TEST PLC**************************************/
+
+  	Read_D(data_read_d, 0, 1);
+//  	UpdateStatus(Sys_CurState);
 
   /****************************************************************************/
     /* USER CODE END WHILE */

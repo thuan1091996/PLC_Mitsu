@@ -11,6 +11,16 @@
 #ifndef PLC_MITSU_H_
 #define PLC_MITSU_H_
 
+typedef enum ReceiveData_Status
+{
+	PLCState_Initial=0,
+	PLCState_DetectSTX,
+	PLCState_DetectETX,
+	PLCState_CSUM,
+	PLCState_OK,
+	PLCState_Error,
+	PLCState_Finish
+}PLC_RecvStatus;
 
 #include "main.h"
 /*--------------------------\\//------------------------------- */
@@ -24,12 +34,6 @@
 #define M_RESET         0x08              //From Autobase
 #define D_MEM_READ      0x01              //From Autobase
 #define D_MEM_WRITE     0x11              //From Autobase
-
-
-/*---------------------Assign variables------------------------*/
-static uint8_t     data_recv[300]={0};
-static uint8_t     data_send_2plc[15];
-
 
 /* ---------Write_D(unsigned short Start_addr, unsigned short Value)---------
  * Operating: Write D memory of PLC FX series
